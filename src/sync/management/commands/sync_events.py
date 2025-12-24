@@ -39,7 +39,6 @@ class Command(BaseCommand):
 
             # 3. Для каждого мероприятия в ответе
             for event in events.get("results"):
-                print(event)
                 # Создаем или находим площадку
                 place = None
                 # Если есть информация о площадке
