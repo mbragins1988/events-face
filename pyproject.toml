@@ -10,6 +10,7 @@ dependencies = [
     "djangorestframework>=3.16.1",
     "djangorestframework-simplejwt>=5.5.1",
     "dotenv>=0.9.9",
+    "kafka-python>=2.3.0",
     "python-dotenv>=1.2.1",
     "requests>=2.32.5",
 ]

@@ -81,3 +81,22 @@ class Registration(models.Model):
 
     def __str__(self):
         return f"{self.full_name} на {self.event.name}"
+
+
+class OutboxMessage(models.Model):
+    """Исходящие уведомления."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4)
+    registration = models.ForeignKey(
+        "Registration", on_delete=models.CASCADE, related_name="outbox_messages"
+    )
+    payload = models.JSONField()  # {id, owner_id, email, message}
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent = models.BooleanField(default=False)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"Notification for {self.registration.email}"

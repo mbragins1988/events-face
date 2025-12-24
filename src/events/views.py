@@ -1,7 +1,14 @@
+import json
 import secrets
+import time
+import uuid
+from datetime import timezone
+from venv import logger
 
 import requests
+from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
+from kafka import KafkaProducer
 from rest_framework import filters, status, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -9,6 +16,8 @@ from rest_framework.views import APIView
 from src.core.settings import NOTIFICATIONS_API_TOKEN, NOTIFICATIONS_OWNER_ID
 from src.events.models import Event, Registration
 from src.events.serializers import EventSerializer, RegistrationSerializer
+
+from .models import OutboxMessage
 
 
 class EventViewSet(viewsets.ReadOnlyModelViewSet):
@@ -64,31 +73,42 @@ class EventRegisterView(APIView):
 
         # Генерируем код подтверждения
         confirmation_code = secrets.token_hex(3).upper()
+        # Генерируем уникальный ID для уведомления
+        notification_id = uuid.uuid4()
 
-        # Создаем регистрацию пользователя на мероприятие
-        registration = Registration.objects.create(
-            event=event,
-            full_name=serializer.validated_data["full_name"],
-            email=serializer.validated_data["email"],
-            confirmation_code=confirmation_code,  # Сохраняем код в базу
-        )
+        # В одной транзакции
+        with transaction.atomic():
+            # Создаём регистрацию пользователя на мероприятие
+            registration = Registration.objects.create(
+                event=event,
+                full_name=serializer.validated_data["full_name"],
+                email=serializer.validated_data["email"],
+                confirmation_code=confirmation_code,
+            )
+
+            # Сохраняем в outbox
+            message = OutboxMessage.objects.create(
+                registration=registration,
+                payload={
+                    "id": str(notification_id),  # УНИКАЛЬНЫЙ для каждого уведомления
+                    "owner_id": str(NOTIFICATIONS_OWNER_ID),
+                    "email": registration.email,
+                    "message": f"Здравствуйте, {registration.full_name}!\nВы успешно зарегистрировались на мероприятие: {event.name}.\nВаш код подтверждения: {confirmation_code}",
+                },
+            )
 
         url = "https://notifications.k3scluster.tech/api/notifications"
 
-        payload = {
-            "id": str(event.id),
-            "owner_id": str(NOTIFICATIONS_OWNER_ID),
-            "email": str(registration.email),
-            "message": f"Здравствуйте, {registration.full_name}!\nВы успешно зарегистрировались на мероприятие: {event.name}.\nВаш код подтверждения: {confirmation_code}",
-        }
         headers = {
             "Authorization": str(NOTIFICATIONS_API_TOKEN),
             "Content-Type": "application/json",
         }
-
         try:
-            response = requests.post(url, json=payload, headers=headers)
+            response = requests.post(url, json=message.payload, headers=headers)
             response.raise_for_status()
+            message.sent = True
+            message.sent_at = timezone.now()
+            message.save()
             return Response(
                 {"message": "Регистрация успешно завершена!"},
                 status=status.HTTP_201_CREATED,
@@ -96,3 +116,44 @@ class EventRegisterView(APIView):
 
         except Exception:
             return Response(response, status=status.HTTP_400_BAD_REQUEST)
+
+
+# worker.py
+def process_outbox():
+    while True:
+        with transaction.atomic():
+            # Получаем неотправленные сообщения
+            messages = (
+                OutboxMessage.objects.filter(sent=False)
+                .select_for_update(skip_locked=True)
+                .order_by("created_at")[:100]
+            )
+
+            for message in messages:
+                try:
+                    # Создание продюсера
+                    producer = KafkaProducer(
+                        bootstrap_servers=["localhost:9092"],  # адрес Kafka-брокера
+                        value_serializer=lambda v: json.dumps(v).encode(
+                            "utf-8"
+                        ),  # сериализатор JSON
+                    )
+                    # Отправляем в Kafka/RabbitMQ/etc
+                    producer.send(
+                        "notifications_topic",
+                        value={
+                            "id": message.id,
+                            "owner_id": message.owner_id,
+                            "email": message.email,
+                            "message": message.message,
+                        },
+                    )
+
+                    # Помечаем как отправленное
+                    message.sent = True
+                    message.sent_at = timezone.now()
+                    message.save()
+                except Exception as e:
+                    logger.error(f"Failed to process message {message.id}: {e}")
+
+        time.sleep(1)  # Пауза между итерациями
