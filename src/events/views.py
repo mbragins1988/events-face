@@ -76,29 +76,23 @@ class EventRegisterView(APIView):
         url = "https://notifications.k3scluster.tech/api/notifications"
 
         payload = {
-            "id": str(event_id),
+            "id": str(event.id),
             "owner_id": str(NOTIFICATIONS_OWNER_ID),
             "email": str(registration.email),
             "message": f"Здравствуйте, {registration.full_name}!\nВы успешно зарегистрировались на мероприятие: {event.name}.\nВаш код подтверждения: {confirmation_code}",
         }
         headers = {
-            "Authorization": f"Bearer {NOTIFICATIONS_API_TOKEN}",
+            "Authorization": str(NOTIFICATIONS_API_TOKEN),
             "Content-Type": "application/json",
         }
 
         try:
             response = requests.post(url, json=payload, headers=headers)
-
-            if response.status_code == 200:
-                return Response(
-                    {
-                        "message": "Регистрация успешно завершена!",
-                    },
-                    status=status.HTTP_200_OK,
-                )
-            else:
-                print(f"{response} - Сообщение не отправлено")
-                return Response(response, status=status.HTTP_403_FORBIDDEN)
+            response.raise_for_status()
+            return Response(
+                {"message": "Регистрация успешно завершена!"},
+                status=status.HTTP_201_CREATED,
+            )
 
         except Exception:
             return Response(response, status=status.HTTP_400_BAD_REQUEST)
