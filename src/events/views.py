@@ -81,13 +81,6 @@ class EventRegisterView(APIView):
             "email": str(registration.email),
             "message": f"Здравствуйте, {registration.full_name}!\nВы успешно зарегистрировались на мероприятие: {event.name}.\nВаш код подтверждения: {confirmation_code}",
         }
-        print("id", str(event_id))
-        print("owner_id", str(NOTIFICATIONS_OWNER_ID))
-        print("email", str(registration.email))
-        print(
-            "message",
-            f"Здравствуйте, {registration.full_name}!\nВы успешно зарегистрировались на мероприятие: {event.name}.\nВаш код подтверждения: {confirmation_code}",
-        )
         headers = {
             "Authorization": f"Bearer {NOTIFICATIONS_API_TOKEN}",
             "Content-Type": "application/json",
